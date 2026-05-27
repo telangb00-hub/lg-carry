@@ -13,7 +13,7 @@ const iconMap: Record<ShortcutIcon, ComponentType<{ size?: number }>> = {
 };
 
 export function Dashboard() {
-  const { itemDatabase, callCarry, returnToHome } = useCarry();
+  const { itemDatabase, callCarry, returnToHome, isBusy } = useCarry();
   const [query, setQuery] = useState("비닐장갑");
   const [shortcuts] = useState<ModeShortcut[]>(() => readModeShortcuts());
   const matchedItem = useMemo(() => findItem(query, itemDatabase), [itemDatabase, query]);
@@ -49,8 +49,8 @@ export function Dashboard() {
           />
           <Mic size={19} />
         </div>
-        <button onClick={callBySearch} disabled={!matchedItem}>
-          {matchedItem ? `${matchedItem.name} 호출` : "물품을 찾을 수 없어요"}
+        <button onClick={callBySearch} disabled={!matchedItem || isBusy}>
+          {isBusy ? "CARRY 이동 중" : matchedItem ? `${matchedItem.name} 호출` : "물품을 찾을 수 없어요"}
         </button>
       </section>
 
@@ -59,7 +59,7 @@ export function Dashboard() {
           const Icon = iconMap[shortcut.icon];
           return (
             <div key={shortcut.id}>
-              <ModeButton icon={Icon} label={shortcut.label} onClick={() => runShortcut(shortcut)} />
+              <ModeButton icon={Icon} label={shortcut.label} onClick={() => runShortcut(shortcut)} disabled={isBusy} />
             </div>
           );
         })}
@@ -72,13 +72,15 @@ function ModeButton({
   icon: Icon,
   label,
   onClick,
+  disabled,
 }: {
   icon: ComponentType<{ size?: number }>;
   label: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <button className="simple-mode-button" onClick={onClick}>
+    <button className="simple-mode-button" onClick={onClick} disabled={disabled}>
       <Icon size={22} />
       <span>{label}</span>
     </button>

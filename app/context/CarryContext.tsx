@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
 export type CarryMode = "idle" | "sleep" | "kitchen" | "living" | "outing" | "returning";
 export type DrawerState = "closed" | "opening" | "open" | "closing";
@@ -54,6 +54,7 @@ interface CarryContextType {
   setDrawer3: (state: DrawerState) => void;
   battery: number;
   isUnityConnected: boolean;
+  isBusy: boolean;
   feedbackMessage: string | null;
   notify: (message: string) => void;
   executionLog: ExecutionLogEntry[];
@@ -165,7 +166,9 @@ export function CarryProvider({ children }: { children: ReactNode }) {
   const [drawer3, setDrawer3] = useState<DrawerState>("closed");
   const [battery] = useState(86);
   const [isUnityConnected] = useState(true);
+  const [isBusy, setIsBusy] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const actionTimersRef = useRef<number[]>([]);
   const [executionLog, setExecutionLog] = useState<ExecutionLogEntry[]>([
     { id: "1", time: "14:15", message: "CARRY 시스템 시작" },
     { id: "2", time: "14:16", message: "거실 위치로 복귀 완료" },
@@ -206,7 +209,22 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [feedbackMessage]);
 
+  useEffect(() => () => clearActionTimers(), []);
+
   const notify = (message: string) => setFeedbackMessage(message);
+
+  const clearActionTimers = () => {
+    actionTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    actionTimersRef.current = [];
+  };
+
+  const scheduleAction = (callback: () => void, delay: number) => {
+    const timer = window.setTimeout(() => {
+      actionTimersRef.current = actionTimersRef.current.filter((item) => item !== timer);
+      callback();
+    }, delay);
+    actionTimersRef.current.push(timer);
+  };
 
   const addLogEntry = (message: string, options?: { silent?: boolean }) => {
     const now = new Date();
@@ -298,6 +316,13 @@ export function CarryProvider({ children }: { children: ReactNode }) {
   };
 
   const callCarry = (targetMode: CarryMode, item?: ItemData) => {
+    if (isBusy) {
+      addLogEntry("CARRY가 이미 이동 중이에요");
+      return;
+    }
+
+    clearActionTimers();
+    setIsBusy(true);
     closeAllDrawers();
     const customization = getCustomizationForMode(targetMode);
 
@@ -313,7 +338,7 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     }
     addLogEntry("이동을 시작했어요");
 
-    setTimeout(() => {
+    scheduleAction(() => {
       const locationMap: Record<CarryMode, Location> = {
         idle: "idle",
         sleep: "bedroom",
@@ -334,31 +359,35 @@ export function CarryProvider({ children }: { children: ReactNode }) {
       setCurrentLocation(newLocation);
       addLogEntry(`${labelMap[newLocation]}로 이동 중`, { silent: true });
 
-      setTimeout(() => {
+      scheduleAction(() => {
         setMode(targetMode);
 
         if (targetMode === "sleep") {
           setDrawer1("opening");
-          setTimeout(() => {
+          scheduleAction(() => {
             setDrawer1("open");
+            setIsBusy(false);
             addLogEntry("안녕히 주무세요");
           }, 500);
         } else if (targetMode === "kitchen") {
           setDrawer2("opening");
-          setTimeout(() => {
+          scheduleAction(() => {
             setDrawer2("open");
+            setIsBusy(false);
             addLogEntry("맛있는 냄새가 나요!");
           }, 500);
         } else if (targetMode === "living") {
           setDrawer3("opening");
-          setTimeout(() => {
+          scheduleAction(() => {
             setDrawer3("open");
+            setIsBusy(false);
             addLogEntry("편하게 쉬어가세요");
           }, 500);
         } else if (targetMode === "outing") {
           setDrawer3("opening");
-          setTimeout(() => {
+          scheduleAction(() => {
             setDrawer3("open");
+            setIsBusy(false);
             addLogEntry("잘 다녀오세요!");
           }, 500);
         }
@@ -367,17 +396,25 @@ export function CarryProvider({ children }: { children: ReactNode }) {
   };
 
   const returnToHome = () => {
+    if (isBusy) {
+      addLogEntry("CARRY가 이미 이동 중이에요");
+      return;
+    }
+
+    clearActionTimers();
+    setIsBusy(true);
     addLogEntry("복귀를 시작했어요");
     setMode("returning");
     setDrawer1("closing");
     setDrawer2("closing");
     setDrawer3("closing");
 
-    setTimeout(() => {
+    scheduleAction(() => {
       closeAllDrawers();
       setCurrentLocation("living");
-      setTimeout(() => {
+      scheduleAction(() => {
         setMode("idle");
+        setIsBusy(false);
         addLogEntry("원래 자리로 복귀했어요");
       }, 1000);
     }, 500);
@@ -398,6 +435,7 @@ export function CarryProvider({ children }: { children: ReactNode }) {
         setDrawer3,
         battery,
         isUnityConnected,
+        isBusy,
         feedbackMessage,
         notify,
         executionLog,

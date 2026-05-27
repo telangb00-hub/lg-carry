@@ -1868,6 +1868,25 @@ a:active {
   box-shadow: 0 14px 26px rgba(30, 30, 30, 0.14);
 }
 
+.call-me-button:disabled,
+.simple-mode-button:disabled,
+.simple-search-card > button:disabled,
+.favorite-item-list button:disabled,
+.voice-mic-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+  box-shadow: none;
+}
+
+.disabled-feature-note {
+  margin: -4px 4px 0;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-align: center;
+}
+
 .custom-add-row {
   display: grid;
   grid-template-columns: 1fr 46px;
