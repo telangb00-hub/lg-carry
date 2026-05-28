@@ -15,11 +15,11 @@ const iconMap: Record<ShortcutIcon, ComponentType<{ size?: number }>> = {
 
 export function Dashboard() {
   const { itemDatabase, callCarry, callShortcutMode, returnToHome, isBusy } = useCarry();
-  const [query, setQuery] = useState("비닐장갑");
+  const [query, setQuery] = useState("");
   const [shortcuts] = useState<ModeShortcut[]>(() => readModeShortcuts());
   const [dbShortcuts, setDbShortcuts] = useState<ModeShortcut[]>([]);
   const matchedItem = useMemo(() => findItem(query, itemDatabase), [itemDatabase, query]);
-  const visibleShortcuts = dbShortcuts.length ? dbShortcuts : shortcuts;
+  const visibleShortcuts = (dbShortcuts.length ? dbShortcuts : shortcuts).filter((shortcut) => shortcut.visibleOnHome !== false);
 
   useEffect(() => {
     void fetchHomeShortcuts().then((items) =>
@@ -33,6 +33,9 @@ export function Dashboard() {
           lightName: item.lightName,
           lightColor: item.lightColor,
           songName: item.music,
+          comment: item.comment,
+          emoji: item.emoji,
+          visibleOnHome: item.visibleOnHome,
         })),
       ),
     );
@@ -70,7 +73,7 @@ export function Dashboard() {
           <Mic size={19} />
         </div>
         <button onClick={callBySearch} disabled={!matchedItem || isBusy}>
-          {isBusy ? "CARRY 이동 중" : matchedItem ? `${matchedItem.name} 호출` : "물품을 찾을 수 없어요"}
+          {isBusy ? "CARRY 이동 중" : query.trim() ? (matchedItem ? "호출하기" : "물품을 찾을 수 없어요") : "호출하기"}
         </button>
       </section>
 
@@ -79,7 +82,7 @@ export function Dashboard() {
           const Icon = iconMap[shortcut.icon];
           return (
             <div key={shortcut.id}>
-              <ModeButton icon={Icon} label={shortcut.label} onClick={() => runShortcut(shortcut)} disabled={isBusy} />
+              <ModeButton icon={Icon} emoji={shortcut.emoji} label={shortcut.label} onClick={() => runShortcut(shortcut)} disabled={isBusy} />
             </div>
           );
         })}
@@ -103,18 +106,20 @@ function getIconForMode(mode: CarryMode | "home"): ShortcutIcon {
 
 function ModeButton({
   icon: Icon,
+  emoji,
   label,
   onClick,
   disabled,
 }: {
   icon: ComponentType<{ size?: number }>;
+  emoji?: string;
   label: string;
   onClick: () => void;
   disabled?: boolean;
 }) {
   return (
     <button className="simple-mode-button" onClick={onClick} disabled={disabled}>
-      <Icon size={22} />
+      {emoji ? <span className="shortcut-emoji">{emoji}</span> : <Icon size={22} />}
       <span>{label}</span>
     </button>
   );
@@ -122,6 +127,7 @@ function ModeButton({
 
 function findItem(command: string, items: ItemData[]) {
   const normalized = command.replace(/\s/g, "").toLowerCase();
+  if (!normalized) return undefined;
   return items.find((item) => normalized.includes(item.name.replace(/\s/g, "").toLowerCase()));
 }
 

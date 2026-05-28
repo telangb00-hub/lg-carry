@@ -9,6 +9,7 @@ export type CarryCommand =
       lightName?: string;
       lightColor?: string;
       music?: string;
+      comment?: string;
       timestamp: string;
     }
   | {
@@ -20,6 +21,7 @@ export type CarryCommand =
       lightName?: string;
       lightColor?: string;
       music?: string;
+      comment?: string;
       timestamp: string;
     }
   | {
@@ -82,6 +84,9 @@ export interface HomeShortcutResponse {
   lightName?: string;
   lightColor?: string;
   music?: string;
+  comment?: string;
+  emoji?: string;
+  visibleOnHome?: boolean;
   sortOrder: number;
 }
 
@@ -105,6 +110,7 @@ export function buildCarryCommand(mode: CarryMode, item?: ItemData, customizatio
     lightName: customization?.lightName,
     lightColor: customization?.lightColor,
     music: customization?.songName,
+    comment: customization?.comment ?? customization?.modeName,
     timestamp: new Date().toISOString(),
   };
 

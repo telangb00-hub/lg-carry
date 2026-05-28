@@ -55,6 +55,7 @@ export interface DrawerCustomization {
   lightName: string;
   lightColor: string;
   songName: string;
+  comment?: string;
   isActive: boolean;
 }
 
@@ -109,7 +110,7 @@ interface CarryContextType {
   defaultCallSettings: DefaultCallSettings;
   setDefaultCallSettings: (settings: DefaultCallSettings) => void;
   callCarry: (mode: CarryMode, item?: ItemData) => void;
-  callShortcutMode: (mode: CarryMode, shortcut: { drawer?: 1 | 2 | 3 | null; lightName?: string; lightColor?: string; songName?: string }) => void;
+  callShortcutMode: (mode: CarryMode, shortcut: { id?: string; label?: string; drawer?: 1 | 2 | 3 | null; lightName?: string; lightColor?: string; songName?: string; comment?: string }) => void;
   returnToHome: () => void;
 }
 
@@ -200,6 +201,9 @@ export function CarryProvider({ children }: { children: ReactNode }) {
   const actionTimersRef = useRef<number[]>([]);
   const lastUnityMessageRef = useRef<string | null>(null);
   const hasPendingUnityCommandRef = useRef(false);
+  const pendingCommandStartedAtRef = useRef(0);
+  const staleUnityMessageRef = useRef<string | null>(null);
+  const pendingCommandSawBusyRef = useRef(false);
   const [executionLog, setExecutionLog] = useState<ExecutionLogEntry[]>([
     { id: "1", time: "14:15", message: "CARRY 시스템 시작" },
     { id: "2", time: "14:16", message: "거실 위치로 복귀 완료" },
@@ -250,6 +254,10 @@ export function CarryProvider({ children }: { children: ReactNode }) {
         return;
       }
       setIsUnityConnected(true);
+      if (shouldIgnoreStalePendingStatus(status)) return;
+      if (hasPendingUnityCommandRef.current && status.busy) {
+        pendingCommandSawBusyRef.current = true;
+      }
       applyUnityStatus(status);
       setExecutionLog((prev) => {
         if (prev[0]?.message === status.message || lastUnityMessageRef.current === status.message) return prev;
@@ -259,9 +267,10 @@ export function CarryProvider({ children }: { children: ReactNode }) {
         return [{ id: `unity-${status.timestamp}`, time, message: status.message }, ...prev];
       });
       const toastMessage = getFinalUnityToastMessage(status.message);
-      if (!status.busy && hasPendingUnityCommandRef.current && toastMessage) {
+      if (!status.busy && hasPendingUnityCommandRef.current && pendingCommandSawBusyRef.current && toastMessage) {
         notify(toastMessage);
         hasPendingUnityCommandRef.current = false;
+        pendingCommandSawBusyRef.current = false;
       }
     }, 1500);
 
@@ -290,6 +299,19 @@ export function CarryProvider({ children }: { children: ReactNode }) {
       callback();
     }, delay);
     actionTimersRef.current.push(timer);
+  };
+
+  const beginPendingUnityCommand = () => {
+    hasPendingUnityCommandRef.current = true;
+    pendingCommandStartedAtRef.current = Date.now();
+    staleUnityMessageRef.current = lastUnityMessageRef.current;
+    pendingCommandSawBusyRef.current = false;
+  };
+
+  const shouldIgnoreStalePendingStatus = (status: CarryStatus) => {
+    if (!hasPendingUnityCommandRef.current || status.busy || pendingCommandSawBusyRef.current) return false;
+    if (Date.now() - pendingCommandStartedAtRef.current < 1800) return true;
+    return Boolean(staleUnityMessageRef.current && status.message === staleUnityMessageRef.current);
   };
 
   const addLogEntry = (message: string, options?: { silent?: boolean }) => {
@@ -518,6 +540,34 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     setDrawer3(drawerNumber === 3 ? "opening" : "closed");
   };
 
+  const applyTemporaryCustomization = (
+    targetMode: CarryMode,
+    shortcut: { id?: string; label?: string; drawer?: 1 | 2 | 3 | null; lightName?: string; lightColor?: string; songName?: string; comment?: string },
+  ) => {
+    const drawer = shortcut.drawer ?? getDrawerForMode(targetMode);
+    if (!drawer) return undefined;
+
+    const nextCustomization: DrawerCustomization = {
+      id: shortcut.id ? `shortcut-${shortcut.id}` : `shortcut-${targetMode}`,
+      drawer,
+      modeName: shortcut.label ?? getDefaultModeName(targetMode),
+      lightName: shortcut.lightName ?? "끄기",
+      lightColor: shortcut.lightColor ?? "#000000",
+      songName: shortcut.songName ?? "없음",
+      comment: shortcut.comment ?? getDefaultCommentForMode(targetMode),
+      isActive: true,
+    };
+
+    setDrawerCustomizations((prev) => [
+      nextCustomization,
+      ...prev
+        .filter((item) => item.id !== nextCustomization.id)
+        .map((item) => (Number(item.drawer) === Number(drawer) ? { ...item, isActive: false } : item)),
+    ]);
+
+    return nextCustomization;
+  };
+
   const closeClosingDrawer = (drawerNumber: number) => {
     setDrawer1(drawerNumber === 1 ? "closing" : "closed");
     setDrawer2(drawerNumber === 2 ? "closing" : "closed");
@@ -573,10 +623,23 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     }
 
     clearActionTimers();
-    hasPendingUnityCommandRef.current = true;
+    beginPendingUnityCommand();
     setIsBusy(true);
+    setStationLightOn(false);
+    setStationMusicOn(false);
+    setMode("idle");
     closeAllDrawers();
-    const customization = getCustomizationForMode(targetMode);
+    const customization = item
+      ? applyTemporaryCustomization(targetMode, {
+          id: `item-${item.id}`,
+          label: item.name,
+          drawer: normalizeDrawer(item.drawer),
+          lightName: defaultCallSettings.lightName,
+          lightColor: defaultCallSettings.lightColor,
+          songName: defaultCallSettings.songName,
+          comment: `${item.name} 준비했어요`,
+        })
+      : getCustomizationForMode(targetMode);
     void sendCarryCommand(buildCarryCommand(targetMode, item, customization));
 
     if (item) {
@@ -598,7 +661,7 @@ export function CarryProvider({ children }: { children: ReactNode }) {
 
   const callShortcutMode = (
     targetMode: CarryMode,
-    shortcut: { drawer?: 1 | 2 | 3 | null; lightName?: string; lightColor?: string; songName?: string },
+    shortcut: { id?: string; label?: string; drawer?: 1 | 2 | 3 | null; lightName?: string; lightColor?: string; songName?: string; comment?: string },
   ) => {
     if (isBusy) {
       addLogEntry("CARRY가 이미 이동 중이에요");
@@ -606,21 +669,15 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     }
 
     clearActionTimers();
-    hasPendingUnityCommandRef.current = true;
+    beginPendingUnityCommand();
     setIsBusy(true);
+    setStationLightOn(false);
+    setStationMusicOn(false);
+    setMode("idle");
     closeAllDrawers();
+    const customization = applyTemporaryCustomization(targetMode, shortcut);
 
-    void sendCarryCommand(
-      buildCarryCommand(targetMode, undefined, {
-        id: "shortcut",
-        drawer: shortcut.drawer ?? getDrawerForMode(targetMode) ?? 1,
-        modeName: targetMode,
-        lightName: shortcut.lightName ?? "끄기",
-        lightColor: shortcut.lightColor ?? "#000000",
-        songName: shortcut.songName ?? "없음",
-        isActive: true,
-      }),
-    );
+    void sendCarryCommand(buildCarryCommand(targetMode, undefined, customization));
 
     addLogEntry("이동을 시작했어요");
   };
@@ -632,7 +689,7 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     }
 
     clearActionTimers();
-    hasPendingUnityCommandRef.current = true;
+    beginPendingUnityCommand();
     setIsBusy(true);
     void sendCarryCommand(buildReturnHomeCommand());
     addLogEntry("복귀를 시작했어요");
@@ -695,6 +752,21 @@ export function CarryProvider({ children }: { children: ReactNode }) {
       {children}
     </CarryContext.Provider>
   );
+}
+
+function getDefaultCommentForMode(mode: CarryMode) {
+  if (mode === "sleep") return "안녕히 주무세요";
+  if (mode === "kitchen") return "맛있는 냄새가 나요!";
+  if (mode === "outing") return "잘 다녀오세요";
+  return "편하게 쉬어가세요";
+}
+
+function getDefaultModeName(mode: CarryMode) {
+  if (mode === "sleep") return "취침";
+  if (mode === "kitchen") return "주방";
+  if (mode === "outing") return "외출";
+  if (mode === "returning") return "복귀";
+  return "거실";
 }
 
 export function useCarry() {

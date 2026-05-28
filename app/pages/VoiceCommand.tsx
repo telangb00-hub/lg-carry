@@ -5,7 +5,10 @@ import { useCarry, type CarryMode, type ItemData } from "../context/CarryContext
 export function VoiceCommand() {
   const { itemDatabase, callCarry, addLogEntry, isBusy } = useCarry();
   const [isListening, setIsListening] = useState(false);
-  const favoriteItems = [...itemDatabase].sort((a, b) => (b.callCount ?? 0) - (a.callCount ?? 0)).slice(0, 4);
+  const favoriteItems = [...itemDatabase]
+    .filter((item) => (item.callCount ?? 0) > 0)
+    .sort((a, b) => (b.callCount ?? 0) - (a.callCount ?? 0))
+    .slice(0, 4);
 
   const listen = () => {
     if (isBusy) return;
@@ -48,10 +51,10 @@ export function VoiceCommand() {
           {favoriteItems.map((item) => (
             <button key={item.id} onClick={() => callItem(item.name)} disabled={isBusy}>
               <span>{item.name}</span>
-              <em>{item.callCount ?? 0}회</em>
+              <em>최근 {item.callCount ?? 0}회 호출했어요!</em>
             </button>
           ))}
-          {itemDatabase.length === 0 && <p className="floor-empty">DB에 등록된 물품이 없습니다.</p>}
+          {favoriteItems.length === 0 && <p className="floor-empty">아직 자주 쓴 물품이 없어요.</p>}
         </div>
       </section>
     </div>

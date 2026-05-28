@@ -1465,6 +1465,16 @@ a:active {
   font-weight: 900;
 }
 
+.shortcut-emoji,
+.mode-manage-emoji {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
 .voice-hero-card {
   display: grid;
   place-items: center;
@@ -1539,28 +1549,33 @@ a:active {
 
 .favorite-item-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 9px;
   margin-top: 14px;
 }
 
 .favorite-item-list button {
-  display: grid;
-  place-items: center;
-  gap: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   min-height: 54px;
+  padding: 0 14px;
   border: 0;
   border-radius: 18px;
   background: #f6f2eb;
   color: var(--color-text);
   font-weight: 900;
+  text-align: left;
 }
 
 .favorite-item-list button em {
+  flex: 0 0 auto;
   color: var(--color-muted);
   font-size: 0.72rem;
   font-style: normal;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .floor-tabs {
@@ -2197,12 +2212,32 @@ a:active {
 }
 
 .mode-manage-card {
-  grid-template-columns: 20px 28px 1fr 34px;
+  grid-template-columns: 20px 28px 1fr auto;
 }
 
 .mode-manage-card div {
   display: grid;
   gap: 4px;
+}
+
+.mode-manage-card.hidden-home {
+  opacity: 0.62;
+}
+
+.mode-manage-actions {
+  display: grid;
+  grid-template-columns: repeat(5, 30px);
+  gap: 5px;
+}
+
+.mode-manage-actions button {
+  width: 30px;
+  height: 30px;
+}
+
+.secondary-form-button {
+  background: #ebe7df !important;
+  color: #202124 !important;
 }
 
 .customize-page {
