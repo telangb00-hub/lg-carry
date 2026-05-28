@@ -2,11 +2,10 @@ import { useState } from "react";
 import { LocateFixed, Mic } from "lucide-react";
 import { useCarry, type CarryMode, type ItemData } from "../context/CarryContext";
 
-const sampleItems = ["비닐장갑", "수면안대", "리모컨", "마스크"];
-
 export function VoiceCommand() {
   const { itemDatabase, callCarry, addLogEntry, isBusy } = useCarry();
   const [isListening, setIsListening] = useState(false);
+  const favoriteItems = [...itemDatabase].sort((a, b) => (b.callCount ?? 0) - (a.callCount ?? 0)).slice(0, 4);
 
   const listen = () => {
     if (isBusy) return;
@@ -46,11 +45,13 @@ export function VoiceCommand() {
           <h3>자주 쓰는 물품</h3>
         </div>
         <div className="favorite-item-list">
-          {sampleItems.map((name) => (
-            <button key={name} onClick={() => callItem(name)} disabled={isBusy}>
-              {name}
+          {favoriteItems.map((item) => (
+            <button key={item.id} onClick={() => callItem(item.name)} disabled={isBusy}>
+              <span>{item.name}</span>
+              <em>{item.callCount ?? 0}회</em>
             </button>
           ))}
+          {itemDatabase.length === 0 && <p className="floor-empty">DB에 등록된 물품이 없습니다.</p>}
         </div>
       </section>
     </div>

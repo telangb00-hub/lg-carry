@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BedDouble, DoorOpen, GripVertical, Home, Plus, Sofa, Trash2, UtensilsCrossed } from "lucide-react";
-import type { CarryMode } from "../context/CarryContext";
+import { useCarry, type CarryMode } from "../context/CarryContext";
 import { readModeShortcuts, saveModeShortcuts, type ModeShortcut, type ShortcutIcon } from "../lib/modeShortcuts";
+import { deleteHomeShortcut, fetchHomeShortcuts, saveHomeShortcut } from "../services/carryCommandBridge";
 
 const iconMap = {
   bed: BedDouble,
@@ -15,7 +16,33 @@ export function ModeBuilder() {
   const [shortcuts, setShortcuts] = useState<ModeShortcut[]>(() => readModeShortcuts());
   const [label, setLabel] = useState("");
   const [mode, setMode] = useState<CarryMode | "home">("living");
-  const [icon, setIcon] = useState<ShortcutIcon>("sofa");
+  const [drawer, setDrawer] = useState<1 | 2 | 3>(3);
+  const { lightPresets, songPresets } = useCarry();
+  const [lightId, setLightId] = useState("");
+  const [songName, setSongName] = useState("없음");
+
+  const selectedLight = lightPresets.find((light) => light.id === lightId) ?? lightPresets[0];
+
+  useEffect(() => {
+    void fetchHomeShortcuts().then((items) =>
+      setShortcuts(
+        items.map((item) => ({
+          id: item.id,
+          label: item.label,
+          mode: item.actionMode,
+          icon: getIconForMode(item.actionMode),
+          drawer: normalizeDrawer(item.drawerNumber),
+          lightName: item.lightName,
+          lightColor: item.lightColor,
+          songName: item.music,
+        })),
+      ),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!lightId && lightPresets[0]) setLightId(lightPresets[0].id);
+  }, [lightId, lightPresets]);
 
   const updateShortcuts = (next: ModeShortcut[]) => {
     setShortcuts(next);
@@ -24,9 +51,34 @@ export function ModeBuilder() {
 
   const addShortcut = () => {
     const trimmed = label.trim();
-    if (!trimmed) return;
-    updateShortcuts([{ id: Date.now().toString(), label: trimmed, mode, icon }, ...shortcuts]);
+    if (!trimmed || !selectedLight) return;
+    const shortcut: ModeShortcut = {
+      id: Date.now().toString(),
+      label: trimmed,
+      mode,
+      icon: getIconForMode(mode),
+      drawer: mode === "home" ? null : drawer,
+      lightName: selectedLight.name,
+      lightColor: selectedLight.color,
+      songName,
+    };
+    updateShortcuts([...shortcuts, shortcut]);
+    void saveHomeShortcut({
+      id: shortcut.id,
+      label: shortcut.label,
+      actionMode: shortcut.mode,
+      drawerNumber: shortcut.drawer,
+      lightName: shortcut.lightName,
+      lightColor: shortcut.lightColor,
+      music: shortcut.songName,
+      sortOrder: shortcuts.length + 1,
+    });
     setLabel("");
+  };
+
+  const deleteShortcut = (id: string) => {
+    updateShortcuts(shortcuts.filter((item) => item.id !== id));
+    void deleteHomeShortcut(id);
   };
 
   return (
@@ -60,12 +112,26 @@ export function ModeBuilder() {
             <option value="outing">외출 동작</option>
             <option value="home">홈으로</option>
           </select>
-          <select value={icon} onChange={(event) => setIcon(event.target.value as ShortcutIcon)}>
-            <option value="bed">침대 아이콘</option>
-            <option value="kitchen">주방 아이콘</option>
-            <option value="sofa">거실 아이콘</option>
-            <option value="outing">문 아이콘</option>
-            <option value="home">홈 아이콘</option>
+          {mode !== "home" && (
+            <select value={drawer} onChange={(event) => setDrawer(Number(event.target.value) as 1 | 2 | 3)}>
+              <option value={1}>1번 칸 열기</option>
+              <option value={2}>2번 칸 열기</option>
+              <option value={3}>3번 칸 열기</option>
+            </select>
+          )}
+          <select value={lightId} onChange={(event) => setLightId(event.target.value)}>
+            {lightPresets.map((light) => (
+              <option key={light.id} value={light.id}>
+                조명: {light.name}
+              </option>
+            ))}
+          </select>
+          <select value={songName} onChange={(event) => setSongName(event.target.value)}>
+            {songPresets.map((song) => (
+              <option key={song} value={song}>
+                음악: {song}
+              </option>
+            ))}
           </select>
           <button onClick={addShortcut}>
             <Plus size={18} />
@@ -83,9 +149,15 @@ export function ModeBuilder() {
               <Icon size={21} />
               <div>
                 <strong>{shortcut.label}</strong>
-                <span>{getModeLabel(shortcut.mode)}</span>
+                <span>
+                  {getModeLabel(shortcut.mode)}
+                  {shortcut.drawer ? ` · ${shortcut.drawer}번 칸` : ""}
+                </span>
+                <span>
+                  {shortcut.lightName ?? "끄기"} · {shortcut.songName ?? "없음"}
+                </span>
               </div>
-              <button onClick={() => updateShortcuts(shortcuts.filter((item) => item.id !== shortcut.id))}>
+              <button onClick={() => deleteShortcut(shortcut.id)}>
                 <Trash2 size={16} />
               </button>
             </article>
@@ -94,6 +166,19 @@ export function ModeBuilder() {
       </section>
     </div>
   );
+}
+
+function normalizeDrawer(drawer?: number | null): 1 | 2 | 3 | null {
+  if (drawer === 1 || drawer === 2 || drawer === 3) return drawer;
+  return null;
+}
+
+function getIconForMode(mode: CarryMode | "home"): ShortcutIcon {
+  if (mode === "sleep") return "bed";
+  if (mode === "kitchen") return "kitchen";
+  if (mode === "outing") return "outing";
+  if (mode === "home") return "home";
+  return "sofa";
 }
 
 function getModeLabel(mode: CarryMode | "home") {

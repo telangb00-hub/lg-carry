@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Plus, Search, Tag } from "lucide-react";
+import { Plus, Search, Tag, Trash2 } from "lucide-react";
 import { useCarry, type CarryMode, type ItemData } from "../context/CarryContext";
 
 const floors = [
@@ -9,7 +9,7 @@ const floors = [
 ];
 
 export function ItemDatabase() {
-  const { itemDatabase, callCarry, addItem } = useCarry();
+  const { itemDatabase, callCarry, addItem, deleteItem } = useCarry();
   const [activeFloor, setActiveFloor] = useState(1);
   const [floorNames, setFloorNames] = useState<Record<number, string>>({
     1: "취침 / 개인 물품",
@@ -104,13 +104,18 @@ export function ItemDatabase() {
 
         <div className="floor-item-list">
           {activeItems.map((item) => (
-            <button key={item.id} onClick={() => callCarry(getModeForItem(item), item)}>
+            <article className="floor-item-row" key={item.id}>
+              <button onClick={() => callCarry(getModeForItem(item), item)}>
               <div>
                 <strong>{item.name}</strong>
-                <span>{floorNames[activeFloor]}</span>
+                <span>{item.location} · 호출 {item.callCount ?? 0}회</span>
               </div>
               <em>호출</em>
-            </button>
+              </button>
+              <button className="floor-delete-button" onClick={() => deleteItem(item.id)} aria-label={`${item.name} 삭제`}>
+                <Trash2 size={15} />
+              </button>
+            </article>
           ))}
           {activeItems.length === 0 && <p className="floor-empty">아직 등록된 물품이 없습니다.</p>}
         </div>

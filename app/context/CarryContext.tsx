@@ -1,4 +1,27 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  buildCarryCommand,
+  buildReturnHomeCommand,
+  fetchCarryItems,
+  fetchCarryStatus,
+  fetchDefaultSettings,
+  fetchLightSettings,
+  fetchMusicSettings,
+  fetchModeSettings,
+  saveDefaultSettings,
+  saveCarryItem,
+  saveLightSetting,
+  saveMusicSetting,
+  saveModeSetting,
+  deleteLightSetting,
+  deleteMusicSetting,
+  deleteCarryItem,
+  deleteModeSetting,
+  sendCarryCommand,
+  increaseCarryItemCallCount,
+  type CarryItemResponse,
+  type CarryStatus,
+} from "../services/carryCommandBridge";
 
 export type CarryMode = "idle" | "sleep" | "kitchen" | "living" | "outing" | "returning";
 export type DrawerState = "closed" | "opening" | "open" | "closing";
@@ -16,6 +39,7 @@ export interface ItemData {
   location: string;
   drawer: number;
   recommendedCallLocation: string;
+  callCount?: number;
 }
 
 export interface LightPreset {
@@ -55,12 +79,21 @@ interface CarryContextType {
   battery: number;
   isUnityConnected: boolean;
   isBusy: boolean;
+  stationLightOn: boolean;
+  stationMusicOn: boolean;
+  collisionCount: number;
+  errorCode: string;
+  moveSpeed: number;
+  stationRunning: boolean;
+  setMoveSpeed: (speed: number) => void;
+  setStationRunning: (running: boolean) => void;
   feedbackMessage: string | null;
   notify: (message: string) => void;
   executionLog: ExecutionLogEntry[];
   addLogEntry: (message: string, options?: { silent?: boolean }) => void;
   itemDatabase: ItemData[];
   addItem: (item: Omit<ItemData, "id">) => void;
+  deleteItem: (id: string) => void;
   lightPresets: LightPreset[];
   addLightPreset: (preset: Omit<LightPreset, "id">) => void;
   deleteLightPreset: (id: string) => void;
@@ -76,21 +109,11 @@ interface CarryContextType {
   defaultCallSettings: DefaultCallSettings;
   setDefaultCallSettings: (settings: DefaultCallSettings) => void;
   callCarry: (mode: CarryMode, item?: ItemData) => void;
+  callShortcutMode: (mode: CarryMode, shortcut: { drawer?: 1 | 2 | 3 | null; lightName?: string; lightColor?: string; songName?: string }) => void;
   returnToHome: () => void;
 }
 
 const CarryContext = createContext<CarryContextType | undefined>(undefined);
-
-const initialItems: ItemData[] = [
-  { id: "1", name: "수면안대", location: "침실", drawer: 1, recommendedCallLocation: "침대 옆" },
-  { id: "2", name: "귀마개", location: "침실", drawer: 1, recommendedCallLocation: "침대 옆" },
-  { id: "3", name: "비닐장갑", location: "주방", drawer: 2, recommendedCallLocation: "주방" },
-  { id: "4", name: "주방타이머", location: "주방", drawer: 2, recommendedCallLocation: "주방" },
-  { id: "5", name: "리모컨", location: "거실", drawer: 3, recommendedCallLocation: "쇼파 옆" },
-  { id: "6", name: "담요", location: "거실", drawer: 3, recommendedCallLocation: "쇼파 옆" },
-  { id: "7", name: "마스크", location: "현관", drawer: 3, recommendedCallLocation: "현관" },
-  { id: "8", name: "우산", location: "현관", drawer: 3, recommendedCallLocation: "현관" },
-];
 
 const initialLights: LightPreset[] = [
   { id: "off", name: "끄기", color: "#F8F5EE" },
@@ -164,16 +187,24 @@ export function CarryProvider({ children }: { children: ReactNode }) {
   const [drawer1, setDrawer1] = useState<DrawerState>("closed");
   const [drawer2, setDrawer2] = useState<DrawerState>("closed");
   const [drawer3, setDrawer3] = useState<DrawerState>("closed");
-  const [battery] = useState(86);
-  const [isUnityConnected] = useState(true);
+  const [battery, setBattery] = useState(86);
+  const [isUnityConnected, setIsUnityConnected] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [stationLightOn, setStationLightOn] = useState(false);
+  const [stationMusicOn, setStationMusicOn] = useState(false);
+  const [collisionCount, setCollisionCount] = useState(0);
+  const [errorCode, setErrorCode] = useState("C-00");
+  const [moveSpeed, setMoveSpeedState] = useState(1.2);
+  const [stationRunning, setStationRunningState] = useState(true);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const actionTimersRef = useRef<number[]>([]);
+  const lastUnityMessageRef = useRef<string | null>(null);
+  const hasPendingUnityCommandRef = useRef(false);
   const [executionLog, setExecutionLog] = useState<ExecutionLogEntry[]>([
     { id: "1", time: "14:15", message: "CARRY 시스템 시작" },
     { id: "2", time: "14:16", message: "거실 위치로 복귀 완료" },
   ]);
-  const [itemDatabase, setItemDatabase] = useState<ItemData[]>(initialItems);
+  const [itemDatabase, setItemDatabase] = useState<ItemData[]>([]);
   const [lightPresets, setLightPresets] = useState<LightPreset[]>(() =>
     mergeLightDefaults(readSaved("carry-light-presets", initialLights)),
   );
@@ -211,6 +242,41 @@ export function CarryProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => clearActionTimers(), []);
 
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      const status = await fetchCarryStatus();
+      if (!status?.message) {
+        setIsUnityConnected(false);
+        return;
+      }
+      setIsUnityConnected(true);
+      applyUnityStatus(status);
+      setExecutionLog((prev) => {
+        if (prev[0]?.message === status.message || lastUnityMessageRef.current === status.message) return prev;
+        lastUnityMessageRef.current = status.message;
+        const now = new Date();
+        const time = `${now.getHours()}:${now.getMinutes().toString().padStart(2, "0")}`;
+        return [{ id: `unity-${status.timestamp}`, time, message: status.message }, ...prev];
+      });
+      const toastMessage = getFinalUnityToastMessage(status.message);
+      if (!status.busy && hasPendingUnityCommandRef.current && toastMessage) {
+        notify(toastMessage);
+        hasPendingUnityCommandRef.current = false;
+      }
+    }, 1500);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    void refreshServerBackedState();
+  }, []);
+
+  const refreshServerBackedState = async () => {
+    await Promise.all([refreshItemsFromDatabase(), refreshLightsFromDatabase(), refreshMusicFromDatabase(), refreshDefaultsFromDatabase()]);
+    await refreshModeSettingsFromDatabase();
+  };
+
   const notify = (message: string) => setFeedbackMessage(message);
 
   const clearActionTimers = () => {
@@ -233,34 +299,128 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     if (!options?.silent) notify(message);
   };
 
+  const refreshItemsFromDatabase = async () => {
+    const items = await fetchCarryItems();
+    setItemDatabase(items.map(mapCarryItemResponse));
+  };
+
+  const refreshLightsFromDatabase = async () => {
+    const lights = await fetchLightSettings();
+    if (lights.length > 0) {
+      setLightPresets(lights.map((light) => ({ id: String(light.id), name: light.name === "없음" ? "끄기" : light.name, color: light.colorHex })));
+    }
+  };
+
+  const refreshMusicFromDatabase = async () => {
+    const songs = await fetchMusicSettings();
+    if (songs.length > 0) {
+      setSongPresets(songs.map((song) => song.name));
+    }
+  };
+
+  const refreshDefaultsFromDatabase = async () => {
+    const defaults = await fetchDefaultSettings();
+    if (!defaults) return;
+    setMoveSpeedState(defaults.moveSpeed);
+    setStationRunningState(defaults.stationRunning);
+    setDefaultCallSettingsState({
+      place: "내 위치",
+      lightName: defaults.lightName,
+      lightColor: defaults.lightColor,
+      songName: defaults.music,
+    });
+  };
+
+  const refreshModeSettingsFromDatabase = async () => {
+    const modes = await fetchModeSettings();
+    if (modes.length === 0) return;
+    setDrawerCustomizations(
+      modes.map((mode) => ({
+        id: mode.mode,
+        drawer: normalizeDrawer(mode.drawerNumber),
+        modeName: mode.label,
+        lightName: mode.lightName,
+        lightColor: mode.lightColor,
+        songName: mode.music,
+        isActive: true,
+      })),
+    );
+  };
+
   const addItem = (item: Omit<ItemData, "id">) => {
-    const newItem: ItemData = { ...item, id: Date.now().toString() };
-    setItemDatabase((prev) => [newItem, ...prev]);
-    addLogEntry(`${item.name} 등록했어요`);
+    void (async () => {
+      const saved = await saveCarryItem({
+        name: item.name,
+        drawerNumber: item.drawer,
+        targetLocation: getTargetLocationFromItem(item),
+        category: item.location,
+        memo: item.recommendedCallLocation,
+      });
+
+      if (!saved) {
+        addLogEntry("DB 저장에 실패했어요");
+        return;
+      }
+
+      setItemDatabase((prev) => [mapCarryItemResponse(saved), ...prev.filter((entry) => entry.name !== saved.name)]);
+      addLogEntry(`${item.name} 등록했어요`);
+    })();
+  };
+
+  const deleteItem = (id: string) => {
+    void (async () => {
+      await deleteCarryItem(id);
+      setItemDatabase((prev) => prev.filter((item) => item.id !== id));
+      addLogEntry("물품을 삭제했어요");
+    })();
   };
 
   const addLightPreset = (preset: Omit<LightPreset, "id">) => {
-    setLightPresets((prev) => [{ ...preset, id: Date.now().toString() }, ...prev]);
-    addLogEntry(`${preset.name} 불빛을 저장했어요`);
+    void (async () => {
+      const saved = await saveLightSetting({ name: preset.name, colorHex: preset.color });
+      if (!saved) {
+        addLogEntry("불빛 저장에 실패했어요");
+        return;
+      }
+      setLightPresets((prev) => [{ id: String(saved.id), name: saved.name, color: saved.colorHex }, ...prev]);
+      addLogEntry(`${preset.name} 불빛을 저장했어요`);
+    })();
   };
 
   const deleteLightPreset = (id: string) => {
     if (lightPresets.length <= 1) return;
-    setLightPresets((prev) => prev.filter((preset) => preset.id !== id));
-    addLogEntry("불빛 설정을 삭제했어요");
+    if (["끄기", "없음"].includes(lightPresets.find((preset) => preset.id === id)?.name ?? "")) return;
+    void (async () => {
+      await deleteLightSetting(id);
+      setLightPresets((prev) => prev.filter((preset) => preset.id !== id));
+      addLogEntry("불빛 설정을 삭제했어요");
+    })();
   };
 
   const addSongPreset = (song: string) => {
     const name = song.trim();
     if (!name) return;
-    setSongPresets((prev) => [name, ...prev]);
-    addLogEntry(`${name} 음악을 저장했어요`);
+    void (async () => {
+      const saved = await saveMusicSetting({ name, description: "사용자 추가 음악" });
+      if (!saved) {
+        addLogEntry("노래 저장에 실패했어요");
+        return;
+      }
+      setSongPresets((prev) => [saved.name, ...prev.filter((item) => item !== saved.name)]);
+      addLogEntry(`${name} 음악을 저장했어요`);
+    })();
   };
 
   const deleteSongPreset = (song: string) => {
     if (songPresets.length <= 1) return;
-    setSongPresets((prev) => prev.filter((item) => item !== song));
-    addLogEntry("노래 설정을 삭제했어요");
+    if (song === "없음") return;
+    void (async () => {
+      const songs = await fetchMusicSettings();
+      const target = songs.find((item) => item.name === song);
+      if (target) await deleteMusicSetting(String(target.id));
+      setSongPresets((prev) => prev.filter((item) => item !== song));
+      addLogEntry("노래 설정을 삭제했어요");
+    })();
   };
 
   const getActiveCustomizationForDrawer = (drawer: 1 | 2 | 3) =>
@@ -273,11 +433,20 @@ export function CarryProvider({ children }: { children: ReactNode }) {
   };
 
   const addDrawerCustomization = (customization: Omit<DrawerCustomization, "id" | "isActive">) => {
-    const newCustomization: DrawerCustomization = { ...customization, id: Date.now().toString(), isActive: true };
+    const newCustomization: DrawerCustomization = { ...customization, id: `custom-${Date.now()}`, isActive: true };
     setDrawerCustomizations((prev) => [
       newCustomization,
       ...prev.map((item) => (Number(item.drawer) === Number(customization.drawer) ? { ...item, isActive: false } : item)),
     ]);
+    void saveModeSetting({
+      mode: newCustomization.id,
+      label: newCustomization.modeName,
+      drawerNumber: newCustomization.drawer,
+      targetLocation: getTargetLocationFromDrawer(newCustomization.drawer),
+      lightName: newCustomization.lightName,
+      lightColor: newCustomization.lightColor,
+      music: newCustomization.songName,
+    });
     addLogEntry(`${customization.modeName} 루틴을 저장했어요`);
   };
 
@@ -292,6 +461,7 @@ export function CarryProvider({ children }: { children: ReactNode }) {
       }
       return remained;
     });
+    void deleteModeSetting(id);
     addLogEntry("커스터마이징을 삭제했어요");
   };
 
@@ -305,14 +475,95 @@ export function CarryProvider({ children }: { children: ReactNode }) {
   };
 
   const setDefaultCallSettings = (settings: DefaultCallSettings) => {
-    setDefaultCallSettingsState(settings);
-    addLogEntry("기본값을 저장했어요");
+    void (async () => {
+      const saved = await saveDefaultSettings({
+        lightName: settings.lightName,
+        lightColor: settings.lightColor,
+        music: settings.songName,
+      });
+      if (saved) {
+        setDefaultCallSettingsState(settings);
+        addLogEntry("기본값을 저장했어요");
+      }
+    })();
+  };
+
+  const setMoveSpeed = (speed: number) => {
+    const nextSpeed = Number(speed.toFixed(2));
+    setMoveSpeedState(nextSpeed);
+    void saveDefaultSettings({ moveSpeed: nextSpeed });
+  };
+
+  const setStationRunning = (running: boolean) => {
+    setStationRunningState(running);
+    void saveDefaultSettings({ stationRunning: running });
+    addLogEntry(running ? "스테이션 시작" : "스테이션 종료");
   };
 
   const closeAllDrawers = () => {
     setDrawer1("closed");
     setDrawer2("closed");
     setDrawer3("closed");
+  };
+
+  const openOnlyDrawer = (drawerNumber: number) => {
+    setDrawer1(drawerNumber === 1 ? "open" : "closed");
+    setDrawer2(drawerNumber === 2 ? "open" : "closed");
+    setDrawer3(drawerNumber === 3 ? "open" : "closed");
+  };
+
+  const openOnlyDrawerAsOpening = (drawerNumber: number) => {
+    setDrawer1(drawerNumber === 1 ? "opening" : "closed");
+    setDrawer2(drawerNumber === 2 ? "opening" : "closed");
+    setDrawer3(drawerNumber === 3 ? "opening" : "closed");
+  };
+
+  const closeClosingDrawer = (drawerNumber: number) => {
+    setDrawer1(drawerNumber === 1 ? "closing" : "closed");
+    setDrawer2(drawerNumber === 2 ? "closing" : "closed");
+    setDrawer3(drawerNumber === 3 ? "closing" : "closed");
+  };
+
+  const applyUnityStatus = (status: CarryStatus) => {
+    setIsBusy(status.busy);
+    setStationLightOn(Boolean(status.lightOn));
+    setStationMusicOn(Boolean(status.musicOn));
+    setBattery(status.battery);
+    setCollisionCount(status.collisionCount ?? 0);
+    setErrorCode(status.errorCode || "C-00");
+    const drawerState = status.drawerState ?? inferDrawerStateFromMessage(status.message, status.openedDrawer);
+    const isMoving =
+      status.message.includes("인식 중") ||
+      status.message.includes("이동 준비 중") ||
+      status.message.includes("이동 중") ||
+      status.message.includes("복귀 중");
+
+    if (status.message.includes("침대") || status.message.includes("취침") || status.message.includes("주무세요")) {
+      setMode("sleep");
+      setCurrentLocation("bedroom");
+    } else if (status.message.includes("주방") || status.message.includes("냄새")) {
+      setMode("kitchen");
+      setCurrentLocation("kitchen");
+    } else if (status.message.includes("쇼파") || status.message.includes("거실") || status.message.includes("쉬어가세요")) {
+      setMode("living");
+      setCurrentLocation("living");
+    } else if (status.message.includes("현관") || status.message.includes("외출") || status.message.includes("다녀오세요")) {
+      setMode("outing");
+      setCurrentLocation("entrance");
+    } else if (status.message.includes("복귀") || status.message.includes("대기 중")) {
+      setMode(status.busy ? "returning" : "idle");
+      setCurrentLocation("living");
+    }
+
+    if (drawerState === "opening" && status.openedDrawer > 0) {
+      openOnlyDrawerAsOpening(status.openedDrawer);
+    } else if (drawerState === "open" && status.openedDrawer > 0) {
+      openOnlyDrawer(status.openedDrawer);
+    } else if (drawerState === "closing") {
+      closeClosingDrawer(status.openedDrawer);
+    } else if (drawerState === "closed" || isMoving) {
+      closeAllDrawers();
+    }
   };
 
   const callCarry = (targetMode: CarryMode, item?: ItemData) => {
@@ -322,11 +573,17 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     }
 
     clearActionTimers();
+    hasPendingUnityCommandRef.current = true;
     setIsBusy(true);
     closeAllDrawers();
     const customization = getCustomizationForMode(targetMode);
+    void sendCarryCommand(buildCarryCommand(targetMode, item, customization));
 
     if (item) {
+      void increaseCarryItemCallCount(item.id).then((saved) => {
+        if (!saved) return;
+        setItemDatabase((prev) => prev.map((entry) => (entry.id === String(saved.id) ? mapCarryItemResponse(saved) : entry)));
+      });
       addLogEntry(`"${item.name}"을 찾았어요`);
       addLogEntry(`${item.drawer}번 칸으로 준비할게요`, { silent: true });
     }
@@ -337,62 +594,35 @@ export function CarryProvider({ children }: { children: ReactNode }) {
       addLogEntry(`${lightText}, ${songText} 준비 중`, { silent: true });
     }
     addLogEntry("이동을 시작했어요");
+  };
 
-    scheduleAction(() => {
-      const locationMap: Record<CarryMode, Location> = {
-        idle: "idle",
-        sleep: "bedroom",
-        kitchen: "kitchen",
-        living: "living",
-        outing: "entrance",
-        returning: "living",
-      };
-      const labelMap: Record<Location, string> = {
-        idle: "대기 위치",
-        bedroom: "침실",
-        kitchen: "주방",
-        living: "거실",
-        entrance: "현관",
-      };
+  const callShortcutMode = (
+    targetMode: CarryMode,
+    shortcut: { drawer?: 1 | 2 | 3 | null; lightName?: string; lightColor?: string; songName?: string },
+  ) => {
+    if (isBusy) {
+      addLogEntry("CARRY가 이미 이동 중이에요");
+      return;
+    }
 
-      const newLocation = locationMap[targetMode];
-      setCurrentLocation(newLocation);
-      addLogEntry(`${labelMap[newLocation]}로 이동 중`, { silent: true });
+    clearActionTimers();
+    hasPendingUnityCommandRef.current = true;
+    setIsBusy(true);
+    closeAllDrawers();
 
-      scheduleAction(() => {
-        setMode(targetMode);
+    void sendCarryCommand(
+      buildCarryCommand(targetMode, undefined, {
+        id: "shortcut",
+        drawer: shortcut.drawer ?? getDrawerForMode(targetMode) ?? 1,
+        modeName: targetMode,
+        lightName: shortcut.lightName ?? "끄기",
+        lightColor: shortcut.lightColor ?? "#000000",
+        songName: shortcut.songName ?? "없음",
+        isActive: true,
+      }),
+    );
 
-        if (targetMode === "sleep") {
-          setDrawer1("opening");
-          scheduleAction(() => {
-            setDrawer1("open");
-            setIsBusy(false);
-            addLogEntry("안녕히 주무세요");
-          }, 500);
-        } else if (targetMode === "kitchen") {
-          setDrawer2("opening");
-          scheduleAction(() => {
-            setDrawer2("open");
-            setIsBusy(false);
-            addLogEntry("맛있는 냄새가 나요!");
-          }, 500);
-        } else if (targetMode === "living") {
-          setDrawer3("opening");
-          scheduleAction(() => {
-            setDrawer3("open");
-            setIsBusy(false);
-            addLogEntry("편하게 쉬어가세요");
-          }, 500);
-        } else if (targetMode === "outing") {
-          setDrawer3("opening");
-          scheduleAction(() => {
-            setDrawer3("open");
-            setIsBusy(false);
-            addLogEntry("잘 다녀오세요!");
-          }, 500);
-        }
-      }, 1000);
-    }, 500);
+    addLogEntry("이동을 시작했어요");
   };
 
   const returnToHome = () => {
@@ -402,22 +632,14 @@ export function CarryProvider({ children }: { children: ReactNode }) {
     }
 
     clearActionTimers();
+    hasPendingUnityCommandRef.current = true;
     setIsBusy(true);
+    void sendCarryCommand(buildReturnHomeCommand());
     addLogEntry("복귀를 시작했어요");
     setMode("returning");
     setDrawer1("closing");
     setDrawer2("closing");
     setDrawer3("closing");
-
-    scheduleAction(() => {
-      closeAllDrawers();
-      setCurrentLocation("living");
-      scheduleAction(() => {
-        setMode("idle");
-        setIsBusy(false);
-        addLogEntry("원래 자리로 복귀했어요");
-      }, 1000);
-    }, 500);
   };
 
   return (
@@ -436,12 +658,21 @@ export function CarryProvider({ children }: { children: ReactNode }) {
         battery,
         isUnityConnected,
         isBusy,
+        stationLightOn,
+        stationMusicOn,
+        collisionCount,
+        errorCode,
+        moveSpeed,
+        stationRunning,
+        setMoveSpeed,
+        setStationRunning,
         feedbackMessage,
         notify,
         executionLog,
         addLogEntry,
         itemDatabase,
         addItem,
+        deleteItem,
         lightPresets,
         addLightPreset,
         deleteLightPreset,
@@ -457,6 +688,7 @@ export function CarryProvider({ children }: { children: ReactNode }) {
         defaultCallSettings,
         setDefaultCallSettings,
         callCarry,
+        callShortcutMode,
         returnToHome,
       }}
     >
@@ -476,4 +708,64 @@ function getDrawerForMode(mode: CarryMode): 1 | 2 | 3 | null {
   if (mode === "kitchen") return 2;
   if (mode === "living" || mode === "outing") return 3;
   return null;
+}
+
+function getFinalUnityToastMessage(message: string) {
+  if (message.includes("주무세요")) return message;
+  if (message.includes("냄새")) return message;
+  if (message.includes("쉬어가세요")) return message;
+  if (message.includes("다녀오세요")) return message;
+  if (message.includes("대기 중")) return "홈으로 돌아왔어요";
+  return null;
+}
+
+function mapCarryItemResponse(item: CarryItemResponse): ItemData {
+  return {
+    id: String(item.id),
+    name: item.name,
+    drawer: item.drawerNumber,
+    location: getLocationLabel(item.targetLocation, item.category),
+    recommendedCallLocation: item.memo || getRecommendedCallLocation(item.targetLocation, item.drawerNumber),
+    callCount: item.callCount ?? 0,
+  };
+}
+
+function getTargetLocationFromItem(item: Omit<ItemData, "id">) {
+  if (item.drawer === 1) return "sleep";
+  if (item.drawer === 2) return "kitchen";
+  if (item.location.includes("현관") || item.location.includes("외출")) return "outing";
+  return "living";
+}
+
+function getLocationLabel(targetLocation: string, category?: string) {
+  if (category) return category;
+  if (targetLocation === "sleep") return "침실";
+  if (targetLocation === "kitchen") return "주방";
+  if (targetLocation === "outing") return "현관";
+  return "거실";
+}
+
+function getRecommendedCallLocation(targetLocation: string, drawerNumber: number) {
+  if (targetLocation === "sleep" || drawerNumber === 1) return "침대 옆";
+  if (targetLocation === "kitchen" || drawerNumber === 2) return "주방";
+  if (targetLocation === "outing") return "현관";
+  return "거실";
+}
+
+function inferDrawerStateFromMessage(message: string, openedDrawer: number) {
+  if (message.includes("문 여는 중")) return "opening";
+  if (message.includes("닫는 중")) return "closing";
+  if (openedDrawer > 0) return "open";
+  return "closed";
+}
+
+function normalizeDrawer(drawerNumber: number): 1 | 2 | 3 {
+  if (drawerNumber === 1 || drawerNumber === 2 || drawerNumber === 3) return drawerNumber;
+  return 3;
+}
+
+function getTargetLocationFromDrawer(drawer: 1 | 2 | 3) {
+  if (drawer === 1) return "sleep";
+  if (drawer === 2) return "kitchen";
+  return "living";
 }

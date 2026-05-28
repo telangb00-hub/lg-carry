@@ -39,9 +39,11 @@ export function SongSettings() {
               <strong>{songName}</strong>
               <p>모드와 루틴에서 선택 가능</p>
             </div>
-            <button onClick={() => deleteSongPreset(songName)} disabled={songPresets.length <= 1}>
-              <Trash2 size={16} />
-            </button>
+            {songName !== "없음" && (
+              <button onClick={() => deleteSongPreset(songName)} disabled={songPresets.length <= 1}>
+                <Trash2 size={16} />
+              </button>
+            )}
           </article>
         ))}
       </section>

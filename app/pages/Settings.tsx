@@ -6,32 +6,39 @@ import {
   ChevronRight,
   CirclePower,
   History,
-  MapPin,
   Music,
   Palette,
   SlidersHorizontal,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
 import { useCarry } from "../context/CarryContext";
+import { useState } from "react";
 
 export function Settings() {
-  const { battery, isUnityConnected } = useCarry();
-  const [speed, setSpeed] = useState(60);
-  const [isRunning, setIsRunning] = useState(true);
+  const {
+    battery,
+    isUnityConnected,
+    collisionCount,
+    errorCode,
+    moveSpeed,
+    stationRunning,
+    setMoveSpeed,
+    setStationRunning,
+  } = useCarry();
   const [showErrorDetail, setShowErrorDetail] = useState(false);
+  const speedPercent = Math.round((moveSpeed / 3.5) * 100);
 
   return (
     <div className="carry-page settings-page">
       <section className="setting-status-grid">
         <StatusCard icon={Battery} label="배터리" value={`${battery}%`} />
         <StatusCard icon={BluetoothConnected} label="연결" value={isUnityConnected ? "정상" : "끊김"} />
-        <StatusCard icon={AlertTriangle} label="충돌" value="0회" />
+        <StatusCard icon={AlertTriangle} label="충돌" value={`${collisionCount}회`} />
         <button className="setting-status-card action" onClick={() => setShowErrorDetail((value) => !value)}>
           <Wrench size={20} />
           <span>오류 코드</span>
-          <strong>C-00</strong>
+          <strong>{errorCode}</strong>
           <ChevronRight size={17} />
         </button>
       </section>
@@ -39,10 +46,10 @@ export function Settings() {
       {showErrorDetail && (
         <section className="error-detail-card">
           <div className="error-row">
-            <strong>C-00</strong>
+            <strong>{errorCode}</strong>
             <div>
-              <b>정상</b>
-              <p>현재 보고된 오류가 없습니다. 기술자에게 보낼 때는 이 코드를 함께 전달하면 됩니다.</p>
+              <b>{errorCode === "C-00" ? "정상" : "점검 필요"}</b>
+              <p>{getErrorDescription(errorCode)}</p>
             </div>
           </div>
         </section>
@@ -51,7 +58,6 @@ export function Settings() {
       <section className="settings-menu-list">
         <SettingLink icon={Palette} title="불빛 설정" desc="색깔을 추가하거나 삭제해요." to="/settings/lights" />
         <SettingLink icon={Music} title="노래 설정" desc="호출음과 모드 음악을 관리해요." to="/settings/songs" />
-        <SettingLink icon={MapPin} title="주차 포인트" desc="자주 두는 위치를 기억해요." to="/settings/parking" />
         <SettingLink icon={SlidersHorizontal} title="기본값 설정" desc="평소 호출에 쓸 기본값을 정해요." to="/default-call" />
         <SettingLink icon={History} title="실행 로그" desc="최근 호출과 설정 변경을 확인해요." to="/log" />
       </section>
@@ -64,16 +70,31 @@ export function Settings() {
           </div>
           <SlidersHorizontal size={22} />
         </div>
-        <input className="speed-range" type="range" min="20" max="100" value={speed} onChange={(event) => setSpeed(Number(event.target.value))} />
-        <div className="speed-value">{speed}%</div>
+        <input
+          className="speed-range"
+          type="range"
+          min="20"
+          max="100"
+          value={speedPercent}
+          onChange={(event) => setMoveSpeed((Number(event.target.value) / 100) * 3.5)}
+        />
+        <div className="speed-value">{speedPercent}% · {moveSpeed.toFixed(1)}m/s</div>
       </section>
 
-      <button className={`power-button${isRunning ? " running" : ""}`} onClick={() => setIsRunning((value) => !value)}>
+      <button className={`power-button${stationRunning ? " running" : ""}`} onClick={() => setStationRunning(!stationRunning)}>
         <CirclePower size={22} />
-        {isRunning ? "스테이션 종료" : "스테이션 시작"}
+        {stationRunning ? "스테이션 종료" : "스테이션 시작"}
       </button>
     </div>
   );
+}
+
+function getErrorDescription(errorCode: string) {
+  if (errorCode === "C-11") return "목표 위치 오브젝트가 연결되지 않았습니다. Unity Inspector의 Target 연결을 확인하세요.";
+  if (errorCode === "C-12") return "NavMeshAgent가 연결되지 않았습니다. AIStation 컴포넌트를 확인하세요.";
+  if (errorCode === "C-13") return "AIStation이 NavMesh 위에 없습니다. 바닥 NavMesh와 시작 위치를 확인하세요.";
+  if (errorCode === "C-20") return "충돌이 감지되었습니다. 이동 경로와 장애물 배치를 확인하세요.";
+  return "현재 보고된 오류가 없습니다. 기술자에게 보낼 때는 이 코드를 함께 전달하면 됩니다.";
 }
 
 function StatusCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {

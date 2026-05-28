@@ -1,8 +1,9 @@
-import { useMemo, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { BedDouble, DoorOpen, Home, Mic, Search, Sofa, UtensilsCrossed } from "lucide-react";
 import { CarryProductVisual } from "../components/CarryProductVisual";
 import { useCarry, type CarryMode, type ItemData } from "../context/CarryContext";
 import { readModeShortcuts, type ModeShortcut, type ShortcutIcon } from "../lib/modeShortcuts";
+import { fetchHomeShortcuts } from "../services/carryCommandBridge";
 
 const iconMap: Record<ShortcutIcon, ComponentType<{ size?: number }>> = {
   bed: BedDouble,
@@ -13,10 +14,29 @@ const iconMap: Record<ShortcutIcon, ComponentType<{ size?: number }>> = {
 };
 
 export function Dashboard() {
-  const { itemDatabase, callCarry, returnToHome, isBusy } = useCarry();
+  const { itemDatabase, callCarry, callShortcutMode, returnToHome, isBusy } = useCarry();
   const [query, setQuery] = useState("비닐장갑");
   const [shortcuts] = useState<ModeShortcut[]>(() => readModeShortcuts());
+  const [dbShortcuts, setDbShortcuts] = useState<ModeShortcut[]>([]);
   const matchedItem = useMemo(() => findItem(query, itemDatabase), [itemDatabase, query]);
+  const visibleShortcuts = dbShortcuts.length ? dbShortcuts : shortcuts;
+
+  useEffect(() => {
+    void fetchHomeShortcuts().then((items) =>
+      setDbShortcuts(
+        items.map((item) => ({
+          id: item.id,
+          label: item.label,
+          mode: item.actionMode,
+          icon: getIconForMode(item.actionMode),
+          drawer: normalizeDrawer(item.drawerNumber),
+          lightName: item.lightName,
+          lightColor: item.lightColor,
+          songName: item.music,
+        })),
+      ),
+    );
+  }, []);
 
   const callBySearch = () => {
     if (matchedItem) callCarry(getModeForItem(matchedItem), matchedItem);
@@ -27,7 +47,7 @@ export function Dashboard() {
       returnToHome();
       return;
     }
-    callCarry(shortcut.mode);
+    callShortcutMode(shortcut.mode, shortcut);
   };
 
   return (
@@ -55,7 +75,7 @@ export function Dashboard() {
       </section>
 
       <section className="simple-mode-grid">
-        {shortcuts.map((shortcut) => {
+        {visibleShortcuts.map((shortcut) => {
           const Icon = iconMap[shortcut.icon];
           return (
             <div key={shortcut.id}>
@@ -66,6 +86,19 @@ export function Dashboard() {
       </section>
     </div>
   );
+}
+
+function normalizeDrawer(drawer?: number | null): 1 | 2 | 3 | null {
+  if (drawer === 1 || drawer === 2 || drawer === 3) return drawer;
+  return null;
+}
+
+function getIconForMode(mode: CarryMode | "home"): ShortcutIcon {
+  if (mode === "sleep") return "bed";
+  if (mode === "kitchen") return "kitchen";
+  if (mode === "outing") return "outing";
+  if (mode === "home") return "home";
+  return "sofa";
 }
 
 function ModeButton({

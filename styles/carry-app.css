@@ -1545,12 +1545,22 @@ a:active {
 }
 
 .favorite-item-list button {
+  display: grid;
+  place-items: center;
+  gap: 3px;
   min-height: 54px;
   border: 0;
   border-radius: 18px;
   background: #f6f2eb;
   color: var(--color-text);
   font-weight: 900;
+}
+
+.favorite-item-list button em {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
 }
 
 .floor-tabs {
@@ -1636,6 +1646,13 @@ a:active {
   margin-top: 12px;
 }
 
+.floor-item-row {
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: 8px;
+  align-items: center;
+}
+
 .floor-item-list button {
   display: flex;
   align-items: center;
@@ -1646,6 +1663,15 @@ a:active {
   border-radius: 18px;
   background: #f6f2eb;
   text-align: left;
+}
+
+.floor-item-list .floor-delete-button {
+  justify-content: center;
+  min-height: 42px;
+  padding: 0;
+  border-radius: 14px;
+  color: #c5003e;
+  background: #fff0f4;
 }
 
 .floor-item-list strong,
@@ -2172,6 +2198,11 @@ a:active {
 
 .mode-manage-card {
   grid-template-columns: 20px 28px 1fr 34px;
+}
+
+.mode-manage-card div {
+  display: grid;
+  gap: 4px;
 }
 
 .customize-page {

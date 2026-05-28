@@ -3,17 +3,17 @@ import { Music2 } from "lucide-react";
 import { useCarry } from "../context/CarryContext";
 
 export function CarryProductVisual() {
-  const { mode, drawer1, drawer2, drawer3, drawerCustomizations } = useCarry();
-  const activeDrawer = getDrawerForMode(mode);
+  const { mode, drawer1, drawer2, drawer3, drawerCustomizations, stationLightOn, stationMusicOn } = useCarry();
+  const activeDrawer = getVisibleDrawer(drawer1, drawer2, drawer3);
   const activeCustomization = activeDrawer
     ? drawerCustomizations.find((customization) => Number(customization.drawer) === activeDrawer && customization.isActive) ??
       drawerCustomizations.find((customization) => Number(customization.drawer) === activeDrawer)
     : undefined;
 
   const lightColor = activeCustomization?.lightColor ?? "#F8F5EE";
-  const lightOff = !activeCustomization || activeCustomization.lightName === "끄기" || mode === "idle" || mode === "returning";
+  const lightOff = !stationLightOn || !activeCustomization || activeCustomization.lightName === "끄기";
   const songName = activeCustomization?.songName ?? "없음";
-  const isMusicOn = songName !== "없음" && songName !== "무음" && !lightOff;
+  const isMusicOn = stationMusicOn && songName !== "없음" && songName !== "무음";
   const blink = mode === "outing";
   const breath = mode === "living";
   const lightMotion = blink
@@ -198,9 +198,9 @@ function MusicBadge({ active, songName, lightColor }: { active: boolean; songNam
   );
 }
 
-function getDrawerForMode(mode: string) {
-  if (mode === "sleep") return 1;
-  if (mode === "kitchen") return 2;
-  if (mode === "living" || mode === "outing") return 3;
+function getVisibleDrawer(drawer1: string, drawer2: string, drawer3: string) {
+  if (drawer1 === "open" || drawer1 === "opening") return 1;
+  if (drawer2 === "open" || drawer2 === "opening") return 2;
+  if (drawer3 === "open" || drawer3 === "opening") return 3;
   return null;
 }

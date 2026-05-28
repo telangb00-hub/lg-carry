@@ -41,9 +41,11 @@ export function LightSettings() {
               <strong>{preset.name}</strong>
               <p>{preset.color}</p>
             </div>
-            <button onClick={() => deleteLightPreset(preset.id)} disabled={lightPresets.length <= 1}>
-              <Trash2 size={16} />
-            </button>
+            {preset.name !== "끄기" && preset.name !== "없음" && (
+              <button onClick={() => deleteLightPreset(preset.id)} disabled={lightPresets.length <= 1}>
+                <Trash2 size={16} />
+              </button>
+            )}
           </article>
         ))}
       </section>
